@@ -11,6 +11,7 @@ import itertools
 from typing import Any
 from torch import nn
 from torch.nn import functional as F
+from torch.nn import MSELoss
 from torch import optim
 
 import numpy as np
@@ -54,7 +55,6 @@ def build_mlp(
     return mlp
 
 
-class MLPPolicySL(BasePolicy, nn.Module, metaclass=abc.ABCMeta):
     """
     Defines an MLP for supervised learning which maps observations to continuous
     actions.
@@ -110,26 +110,40 @@ class MLPPolicySL(BasePolicy, nn.Module, metaclass=abc.ABCMeta):
             self.learning_rate
         )
 
+    def policy(self, observation: torch.FloatTensor) -> Any:
+        # Compute mean tensor
+        mean = self.mean_net(observation)
+
+        # Return the mean as an action vector
+        return mean  # shape: (8,)
+
     def save(self, filepath):
         """
         :param filepath: path to save MLP
         """
         torch.save(self.state_dict(), filepath)
 
-    def forward(self, observation: torch.FloatTensor) -> Any:
-        """
-        Defines the forward pass of the network
+    # def forward(self, observation: torch.FloatTensor) -> Any:
+    #     """
+    #     Defines the forward pass of the network
+    #
+    #     :param observation: observation(s) to query the policy
+    #     :return:
+    #         action: sampled action(s) from the policy
+    #     """
+    #     # TODO: implement the forward pass of the network.
+    #     # You can return anything you want, but you should be able to differentiate
+    #     # through it. For example, you can return a torch.FloatTensor. You can also
+    #     # return more flexible objects, such as a
+    #     # `torch.distributions.Distribution` object. It's up to you!
+    #     raise NotImplementedError
 
-        :param observation: observation(s) to query the policy
-        :return:
-            action: sampled action(s) from the policy
-        """
-        # TODO: implement the forward pass of the network.
-        # You can return anything you want, but you should be able to differentiate
-        # through it. For example, you can return a torch.FloatTensor. You can also
-        # return more flexible objects, such as a
-        # `torch.distributions.Distribution` object. It's up to you!
-        raise NotImplementedError
+    def forward(self, observation: torch.FloatTensor) -> Any:
+        # Use PyTorch's built-in functions to create a tensor that represents the action taken by the policy.
+        logits = self.policy(observation)
+        action = torch.argmax(logits, dim=1)
+
+        return action
 
     def update(self, observations, actions):
         """
@@ -141,6 +155,9 @@ class MLPPolicySL(BasePolicy, nn.Module, metaclass=abc.ABCMeta):
             dict: 'Training Loss': supervised learning loss
         """
         # TODO: update the policy and return the loss
+        # Input should be a look-up from the data structure created by the forward pass
+        # output should be the 8-dim training loss
+
         loss = TODO
         return {
             # You can add extra logging information here, but keep this line
