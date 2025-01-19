@@ -9,67 +9,53 @@ from collections import OrderedDict
 import cv2
 import numpy as np
 import time
+import torch
 
 from cs285.infrastructure import pytorch_util as ptu
 
 
 def sample_trajectory(env, policy, max_path_length, render=False):
     """Sample a rollout in the environment from a policy."""
-    
-    # initialize env for the beginning of a new rollout
-    ob =  env.reset() # TODO: initial observation after resetting the env
+
+    ob = env.reset()  # initial observation after resetting the env
 
     # init vars
-    index = np.random.permutation(len(policy))
-    ob = policy.observations[index]
-
-    nob = policy.next_observations[index]
-    rew = policy.rewards[index]
-    obs = []
-    acs = []
-    next_obs = []
-    rewards = []
-    terminals = [1]  # not actually terminal, just initialized
-    # steps = 1
-    image_obs = []
+    obs, acs, rewards, next_obs, terminals, image_obs = [], [], [], [], [], []
     steps = 0
     while True:
-
-        # render image of the simulated env
         if render:
             if hasattr(env, 'sim'):
                 img = env.sim.render(camera_name='track', height=500, width=500)[::-1]
             else:
                 img = env.render(mode='single_rgb_array')
             image_obs.append(cv2.resize(img, dsize=(250, 250), interpolation=cv2.INTER_CUBIC))
-    
-        # TODO use the most recent ob to decide what to do
-        ac = policy.actions[index]
 
-        # TODO: take that action and get reward and next ob
-        next_ob, rew, done, _ = nob, rew, 1, 0
-        
-        # TODO rollout can end due to done, or due to max_path_length
+        # Use the most recent observation to decide what action to take
+        ac = policy.forward(torch.FloatTensor(ob).to(ptu.device)).cpu().detach().numpy()
+
+        # Take that action and get the next state, reward, and done flag
+        next_ob, rew, done, _ = env.step(ac)
+
+        # End the rollout if done or max_path_length is reached
         steps += 1
-        rollout_done = done # HINT: this is either 0 or 1
-        
-        # record result of taking that action
+        rollout_done = done or (steps >= max_path_length)
+
+        # Record the result of taking that action
         obs.append(ob)
         acs.append(ac)
         rewards.append(rew)
         next_obs.append(next_ob)
         terminals.append(rollout_done)
 
-        ob = next_ob # jump to next timestep
+        ob = next_ob  # jump to the next timestep
 
-        # end the rollout if the rollout ended
         if rollout_done:
             break
 
-    return {"observation" : np.array(obs, dtype=np.float32),
-            "image_obs" : np.array(image_obs, dtype=np.uint8),
-            "reward" : np.array(rewards, dtype=np.float32),
-            "action" : np.array(acs, dtype=np.float32),
+    return {"observation": np.array(obs, dtype=np.float32),
+            "image_obs": np.array(image_obs, dtype=np.uint8),
+            "reward": np.array(rewards, dtype=np.float32),
+            "action": np.array(acs, dtype=np.float32),
             "next_observation": np.array(next_obs, dtype=np.float32),
             "terminal": np.array(terminals, dtype=np.float32)}
 
@@ -161,3 +147,39 @@ def compute_metrics(paths, eval_paths):
 
 def get_pathlength(path):
     return len(path["reward"])
+
+
+import numpy as np
+
+
+def normalize_obs(obs, standardizer):
+    """Normalize the observation using mean and stddev."""
+    mean = standardizer['mean_1_D']
+    meansq = standardizer['meansq_1_D']
+    stddev = np.sqrt(np.maximum(meansq - mean ** 2, 1e-6))
+    return (obs - mean) / (stddev + 1e-6)
+
+
+def forward_pass(obs, gaussian_policy):
+    """Compute the action using the Gaussian policy."""
+    # Normalize observation
+    standardizer = gaussian_policy['obsnorm']['Standardizer']
+    obs = normalize_obs(obs, standardizer)
+
+    # Hidden layer 0
+    W0 = gaussian_policy['hidden']['FeedforwardNet']['layer_0']['AffineLayer']['W']
+    b0 = gaussian_policy['hidden']['FeedforwardNet']['layer_0']['AffineLayer']['b']
+    h0 = np.tanh(obs @ W0 + b0)
+
+    # Hidden layer 2
+    W2 = gaussian_policy['hidden']['FeedforwardNet']['layer_2']['AffineLayer']['W']
+    b2 = gaussian_policy['hidden']['FeedforwardNet']['layer_2']['AffineLayer']['b']
+    h2 = np.tanh(h0 @ W2 + b2)
+
+    # Output layer
+    W_out = gaussian_policy['out']['AffineLayer']['W']
+    b_out = gaussian_policy['out']['AffineLayer']['b']
+    means = h2 @ W_out + b_out
+    action = means
+
+    return action

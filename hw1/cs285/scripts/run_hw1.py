@@ -55,7 +55,7 @@ def run_training_loop(params):
 
     # Set logger attributes
     log_video = True
-    log_metrics = True
+    log_metrics = False
 
     #############
     ## ENV
@@ -161,9 +161,9 @@ def run_training_loop(params):
           # for imitation learning, we only need observations and actions.  
           #ob_batch, ac_batch = TODO
           # sample some data from replay_buffer
-          indices = np.random.permutation(len(replay_buffer.observations))
-          ob_batch = replay_buffer.observations[indices[:params['train_batch_size']]]
-          ac_batch = replay_buffer.actions[indices[:params['train_batch_size']]]
+          indices = np.random.permutation(len(replay_buffer.obs))
+          ob_batch = replay_buffer.obs[indices[:params['train_batch_size']]]
+          ac_batch = replay_buffer.acs[indices[:params['train_batch_size']]]
 
           # use the sampled data to train an agent
           train_log = actor.update(ob_batch, ac_batch)

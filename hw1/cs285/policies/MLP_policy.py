@@ -54,7 +54,7 @@ def build_mlp(
     mlp = nn.Sequential(*layers)
     return mlp
 
-
+class MLPPolicySL(BasePolicy, nn.Module, metaclass=abc.ABCMeta):
     """
     Defines an MLP for supervised learning which maps observations to continuous
     actions.
@@ -110,12 +110,16 @@ def build_mlp(
             self.learning_rate
         )
 
-    def policy(self, observation: torch.FloatTensor) -> Any:
-        # Compute mean tensor
-        mean = self.mean_net(observation)
+    def policy(self, observation: torch.FloatTensor) -> torch.FloatTensor:
+        """
+        Computes the mean action vector for a given observation using the mean network.
 
-        # Return the mean as an action vector
-        return mean  # shape: (8,)
+        :param observation: observation(s) to query the policy
+        :return:
+            mean_action: predicted mean action vector (continuous values)
+        """
+        mean_action = self.mean_net(observation)
+        return mean_action
 
     def save(self, filepath):
         """
@@ -123,43 +127,61 @@ def build_mlp(
         """
         torch.save(self.state_dict(), filepath)
 
-    # def forward(self, observation: torch.FloatTensor) -> Any:
+    # def forward(self, observation: torch.FloatTensor) -> torch.FloatTensor:
     #     """
-    #     Defines the forward pass of the network
+    #     Defines the forward pass of the network for continuous actions.
     #
     #     :param observation: observation(s) to query the policy
     #     :return:
-    #         action: sampled action(s) from the policy
+    #         mean_action: predicted continuous action vector
     #     """
-    #     # TODO: implement the forward pass of the network.
-    #     # You can return anything you want, but you should be able to differentiate
-    #     # through it. For example, you can return a torch.FloatTensor. You can also
-    #     # return more flexible objects, such as a
-    #     # `torch.distributions.Distribution` object. It's up to you!
-    #     raise NotImplementedError
+    #     # Pass observation through the mean network to get the mean action
+    #     mean_action = self.mean_net(observation)
+    #     return mean_action
 
-    def forward(self, observation: torch.FloatTensor) -> Any:
-        # Use PyTorch's built-in functions to create a tensor that represents the action taken by the policy.
-        logits = self.policy(observation)
-        action = torch.argmax(logits, dim=1)
+    def forward(self, observation: torch.FloatTensor) -> torch.FloatTensor:
+        """
+        Defines the forward pass of the network for continuous actions.
 
-        return action
+        :param observation: observation(s) to query the policy
+        :return:
+            action: sampled action(s) from the policy (continuous values)
+        """
+        # Pass observation through the mean network to get the mean action
+        mean_action = self.mean_net(observation)
+
+        # Optional: Sample from a Gaussian distribution if you want to introduce stochasticity
+        # (Here, we're assuming self.logstd has been defined to represent log standard deviation)
+        std = torch.exp(self.logstd)
+        distribution = torch.distributions.Normal(mean_action, std)
+        action = distribution.rsample()  # Use rsample() for reparameterization trick (if training with gradients)
+
+        return action  # This is the continuous action to be used
 
     def update(self, observations, actions):
         """
-        Updates/trains the policy
+        Updates/trains the policy by comparing predicted actions to expert actions.
 
-        :param observations: observation(s) to query the policy
-        :param actions: actions we want the policy to imitate
+        :param observations: observation(s) to query the policy (numpy array)
+        :param actions: actions we want the policy to imitate (numpy array)
         :return:
             dict: 'Training Loss': supervised learning loss
         """
-        # TODO: update the policy and return the loss
-        # Input should be a look-up from the data structure created by the forward pass
-        # output should be the 8-dim training loss
+        # Convert observations and actions to torch tensors
+        observations = torch.from_numpy(observations).float().to(ptu.device)  # Convert to tensor and move to device
+        actions = torch.from_numpy(actions).float().to(ptu.device)  # Convert to tensor and move to device
 
-        loss = TODO
+        # Forward pass to predict actions given observations
+        predicted_actions = self.forward(observations)
+
+        # Compute loss (e.g., Mean Squared Error for continuous actions)
+        loss = torch.nn.functional.mse_loss(predicted_actions, actions)
+
+        # Backpropagation
+        self.optimizer.zero_grad()  # Reset gradients
+        loss.backward()  # Compute gradients
+        self.optimizer.step()  # Update parameters
+
         return {
-            # You can add extra logging information here, but keep this line
-            'Training Loss': ptu.to_numpy(loss),
+            'Training Loss': loss.item(),
         }
